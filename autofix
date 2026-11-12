@@ -1,0 +1,161 @@
+create table clientes (
+	id serial primary key,
+	nome varchar (150) not null,
+	email varchar (150) unique not null,
+	telefone varchar(15) not null,
+	cpf varchar (11) unique not null,
+	data_cadastro TIMESTAMP default current_TIMESTAMP
+);
+
+create table mecanicos (
+	id serial PRIMARY key,
+	nome varchar(150) not null,
+	especialidade varchar(100) not null,
+	valor_hora NUMERIC(10,2) not null
+);
+
+create table veiculos (
+	id serial primary key,
+	cliente_id int not null,
+	placa varchar(7) unique not null,
+	modelo VARCHAR(50) not null,
+	marca varchar(50) not null,
+	ano int not null check (ano > 1900),
+
+	constraint fk_veiculo_cliente
+	FOREIGN key (cliente_id)
+	REFERENCES clientes(id)
+	on delete cascade
+);
+
+create table ordem_servico (
+	id serial primary key,
+	veiculo_id int not null,
+	mecanico_id int not null,
+	data_abertura TIMESTAMP default current_timestamp,
+	valor_mao_obra NUMERIC(10,2) not null default 0.00  check (valor_mao_obra >= 0),
+	status varchar(20) default 'Em Aberto' CHECK (status in('Em Aberto','Em Andamento','Concluida','Cancelada')),
+
+	constraint fk_os_veiculo
+	FOREIGN key (veiculo_id)
+	REFERENCES veiculos(id)
+	ON delete RESTRICT,
+
+	constraint fk_os_mecanico
+	foreign key (mecanico_id)
+	references mecanicos(id)
+	on delete restrict
+);
+
+create table peca_os (
+	id serial primary key,
+	os_id int not null,
+	nome_peca varchar(150) not null,
+	quantidade int not null check (quantidade >0),
+	valor_unitario numeric (10,2) not null check (valor_unitario > 0),
+
+	constraint fk_peca_os
+	FOREIGN key (os_id)
+	references ordem_servico(id)
+	on delete cascade
+);
+
+INSERT INTO clientes (nome, email, telefone, cpf) VALUES 
+('Fernanda Lima', 'fernanda.lima@email.com', '(48) 99911-2233', '11122233344'),
+('Roberto Souza', 'roberto.souza@email.com', '(48) 98822-4455', '55566677788'),
+('Amanda Martins', 'amanda.martins@email.com', '(48) 97733-6677', '99900011122');
+
+INSERT INTO mecanicos (nome, especialidade, valor_hora) VALUES 
+('Carlos Eduardo', 'Motor e Câmbio', 120.00),
+('Marcos Vinicius', 'Suspensão e Freios', 85.00),
+('João Pedro', 'Elétrica e Injeção', 100.00);
+
+INSERT INTO veiculos (cliente_id, placa, modelo, marca, ano) VALUES 
+(1, 'ABC1D23', 'Civic 2.0', 'Honda', 2020),       -- Veículo 1 (Fernanda)
+(1, 'XYZ9K88', 'Fit 1.5', 'Honda', 2018),         -- Veículo 2 (Fernanda)
+(2, 'KLR4M55', 'Corolla 2.0', 'Toyota', 2021),    -- Veículo 3 (Roberto)
+(3, 'JHG8T77', 'Onix 1.0 Turbo', 'Chevrolet', 2022);-- Veículo 4 (Amanda)
+
+INSERT INTO ordem_servico(veiculo_id, mecanico_id, valor_mao_obra, status) VALUES 
+(1, 1, 350.00, 'Concluida'),   -- OS 1 (Civic da Fernanda com Carlos)
+(2, 2, 180.00, 'Concluida'),   -- OS 2 (Fit da Fernanda com Marcos)
+(3, 1, 500.00, 'Em Andamento'),-- OS 3 (Corolla do Roberto com Carlos)
+(4, 3, 200.00, 'Concluida');   -- OS 4 (Onix da Amanda com João)
+
+INSERT INTO peca_os (os_id, nome_peca, quantidade, valor_unitario) VALUES 
+(1, 'Jogo de Velas Iridium', 1, 240.00),
+(1, 'Óleo Sintético 5W30 (Litro)', 4, 60.00),
+(2, 'Pastilha de Freio Dianteira', 1, 150.00),
+(4, 'Bateria 60Ah', 1, 420.00);
+
+
+CREATE view contatos as
+
+select 
+	v.marca,
+	v.modelo,
+	v.placa,
+	c.nome as clientes,
+	c.telefone
+
+FROM veiculos v 
+
+inner join clientes c on v.cliente_id = c.id
+
+order by v.marca asc, v.modelo asc
+
+create view servicos as
+
+select 
+	os.id as ordem_servico,
+	v.placa as veiculos,
+	v.modelo,
+	os.data_abertura,
+	m.nome as mecanicos,
+	os.status
+
+from ordem_servico os
+
+inner join veiculos v on os.veiculo_id = v.id
+inner join clientes c on v.cliente_id = c.id
+inner join mecanicos m on os.mecanico_id = m.id
+
+	where c.nome = 'Fernanda Lima'
+	order by os.data_abertura desc;
+
+create view valor_total_os as
+
+    select 
+	os.id as ordem_servico,
+	v.placa as veiculos,
+	m.nome as mecanicos,
+	os.valor_mao_obra,
+	COALESCE(sum(p.quantidade * valor_unitario),0.00) as valor_total,
+	(os.valor_mao_obra + coalesce(sum(p.quantidade * valor_unitario),0.00)) as valor_total_os
+from ordem_servico os
+	inner join veiculos v on os.veiculo_id = v.id
+	inner join mecanicos m on os.mecanico_id = m.id
+	left join peca_os p on os.id = p.os_id
+	group by os.id,v.placa,m.nome,os.valor_mao_obra
+	order by os.id;
+
+CREATE view valor_maior_noventa as
+
+select 
+	nome as mecanicos,
+	especialidade,
+	valor_hora
+from mecanicos
+where valor_hora > 90
+order by valor_hora desc;
+
+create view vw_faturamento_mao_obra as
+
+SELECT 
+    m.especialidade,
+    COUNT(os.id) AS qtd_servicos_concluidos,
+    COALESCE(SUM(os.valor_mao_obra), 0.00) AS faturamento_mao_obra
+FROM mecanicos m
+LEFT JOIN ordem_servico os ON m.id = os.mecanico_id AND os.status = 'Concluida'
+GROUP BY m.especialidade
+ORDER BY faturamento_mao_obra DESC;
